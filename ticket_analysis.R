@@ -2,6 +2,7 @@ library(broom)
 library(dplyr)
 library(ggdag)
 library(ggplot2)
+library(ggrepel)
 library(lubridate)
 library(plotly)
 
@@ -254,12 +255,10 @@ barplot_weather_by_day <- function(daily_data_df, save_plot=FALSE) {
   }
 }
 
-
-
 scatterplot_monthly_tickets_vs_ridership <- function(monthly_data, save_plot = FALSE) {
   g <- ggplot(data = monthly_data, aes(x = estimated_boardings, y = num_tickets)) +
-    geom_point() +
-    geom_text(aes(label = Month.of.Month), vjust = 0, hjust = 0) +
+    geom_point(position = 'jitter') +
+    geom_text_repel(aes(label = Month.of.Month)) +
     scale_x_continuous('Estimated Daily Boardings', expand = expand_scale(.5)) +
     scale_y_continuous('Number of Monthly Citations') +
     ggtitle('Citation Volume vs. Ridership', subtitle = 'Data from March 2017 - March 2018') +
@@ -322,7 +321,6 @@ rain_vs_no_rain_summary <- daily_data %>%
 ### plots on plots
 
 boxplot_by_weather_and_day(daily_data)
-
 
 linear_model <- function(ticket_data_by_day) {
   ticket_data_by_day$char_day_of_week <- as.character(ticket_data_by_day$day_of_week)
