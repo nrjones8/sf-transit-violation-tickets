@@ -6,10 +6,15 @@ library(ggrepel)
 library(lubridate)
 library(plotly)
 
-# 03/01/2017
+# "03/01/2017"
 ticket_date_format <- '%m/%d/%Y'
+# "2017-01-01"
 weather_date_format <- '%Y-%m-%d'
 
+# Read in individual citations CSV. Parses a few fields, and adds a number of additional dervied fields 
+# (e.g. `day_of_week` is based on the day the ticket was issued, but itself was not a field in the original data)
+# Note that only one year's worth of dat is returned here, even though the original data provided by the SFMTA
+# included one year + one month of data.
 prep_violation_date <- function() {
   all_tickets <- read.csv('data/P000340_042418_Transit_Violation_Tickets_March_2017_through_March_2018.csv')
   all_tickets <- all_tickets %>% 
@@ -32,6 +37,8 @@ prep_violation_date <- function() {
   return(all_tickets)
 }
 
+# Reads in daily weather data, from the CSV provided by the NOAA. Adds a dervied `did_it_rain` field, if there
+# was any precipitation.
 prep_weather_data <- function() {
   daily_weather <- read.csv('data/raw/order_1327523_noaa_2017_01_01_to_2018_04_23.csv')
   daily_weather <- daily_weather %>%
@@ -42,8 +49,10 @@ prep_weather_data <- function() {
   return(daily_weather)
 }
 
+# Reads in monthly ridership data, as downloaded from the SF MTA's website (linke below). Also handles the
+# funkiness of fiscal years by adding an additional field that includes the "true" year.
 prep_monthly_ridership_data <- function() {
-  # https://www.sfmta.com/reports/muni-average-weekday-boardings
+  # Data from https://www.sfmta.com/reports/muni-average-weekday-boardings
   riders <- read.csv('data/raw/muni_average_weekday_boardings.csv')
   parse_month_num <- function(raw_month) {
     cleaned_month <- trimws(as.character(raw_month))
@@ -68,6 +77,8 @@ combine_violation_weather_data <- function(violation_df, weather_df) {
   return(together)
 }
 
+# Returns a DF with each row representing one day's worth of citations. Includes a number of summary statistics
+# for that day - see the code for real details!
 daily_violation_data <- function(df_with_weather) {
   by_day <- df_with_weather %>%
     group_by(weather_date) %>%
@@ -93,6 +104,8 @@ daily_violation_data <- function(df_with_weather) {
   return(by_day)
 }
 
+# Prints some summary data about `df`, which is expected to have one row per violation (i.e. the original
+# dataset that the SF MTA provided).
 summarize_ticket_data <- function(df) {
   by_violation <- df %>%
     group_by(Violation.Desc) %>%
@@ -130,6 +143,7 @@ summarize_ticket_data <- function(df) {
     )
 }
 
+# Displays summary of daily data (`df` is expected to have one row per day, and include weather data).
 summarize_weather_citations_data <- function(df) {
   # df should be the daily summary data
   overall_summary <- df %>%
@@ -201,6 +215,9 @@ summarize_weather_by_part_of_week <- function(df) {
   print(by_weekday_or_not)
 }
 
+# Creates a boxplot grouped by weather and day of week, showing how the number of citations passed out on each
+# day of the week varies depending on whether it rained or not.
+# `df_daily` should have on row per day. If `save_plot` is true, saves the plot that was created.
 boxplot_by_weather_and_day <- function(df_daily, save_plot=FALSE) {
   # Just create a new column with readable names, they'll get used for the legend
   df_daily$weather_description <- ifelse(df_daily$did_it_rain, 'Rain', 'No Rain')
@@ -219,24 +236,7 @@ boxplot_by_weather_and_day <- function(df_daily, save_plot=FALSE) {
   }
 }
 
-plotly_boxplot <- function(df_daily) {
-  # Just create a new column with readable names, they'll get used for the legend
-  df_daily$weather_description <- ifelse(df_daily$did_it_rain, 'Rain', 'No Rain')
-
-  p <- plot_ly(
-    df_daily,
-    x = ~day_of_week,
-    y = ~total_tickets,
-    color = ~weather_description,
-    type = 'box',
-    boxpoint = 'all',
-    hoverinfo = ~paste(
-      'some text'
-    )
-  ) %>% layout(boxmode = "group")
-  p
-}
-
+# Creates a barplot of how many days it rained on each day of the week
 barplot_weather_by_day <- function(daily_data_df, save_plot=FALSE) {
   rain_by_day <- daily_data_df %>%
     filter(did_it_rain) %>%
@@ -255,6 +255,8 @@ barplot_weather_by_day <- function(daily_data_df, save_plot=FALSE) {
   }
 }
 
+# Creates a scatterplot with estimated daily boardings (for a given month) on the X axis, number of
+# citations (for that given month) on the Y axis
 scatterplot_monthly_tickets_vs_ridership <- function(monthly_data, save_plot = FALSE) {
   g <- ggplot(data = monthly_data, aes(x = estimated_boardings, y = num_tickets)) +
     geom_point(position = 'jitter') +
@@ -268,6 +270,14 @@ scatterplot_monthly_tickets_vs_ridership <- function(monthly_data, save_plot = F
   if (save_plot) {
     ggsave('graphics/scatter_citation_vs_ridership', device='png')
   }
+}
+
+# Create a simple linear model
+linear_model <- function(ticket_data_by_day) {
+  ticket_data_by_day$char_day_of_week <- as.character(ticket_data_by_day$day_of_week)
+  day_of_week_model <- lm(total_tickets ~ did_it_rain + char_day_of_week, data = ticket_data_by_day)
+  print(summary(day_of_week_model))
+  return(day_of_week_model)
 }
 
 violation_data <- prep_violation_date()
@@ -291,15 +301,10 @@ monthly_violation_data <- daily_data %>%
 
 summarize_ticket_data(violation_data)
 summarize_daily_data(daily_data)
+boxplot_by_weather_and_day(daily_data)
+model <- linear_model(daily_data)
 
-# ok, so the interesting thing is probably to look at:
-# 1. Rain correlated with more tickets
-# 2. Rain correlated with greater total fees
-# 3. Rain correlated, but less so, with total _paid_ fees
-# 4. If that's all true, then supports hypothesis that rainy days may mean more tickets, but those tickets are
-# less likely to be paid (presumably b/c the extra people riding transit on rainy days can't afford / are just trying
-# to get out of the rain).
-# That does _not_ seem to be true - here we look at what % of fees have actually been paid. They're the same (~25%) across
+# Look at what % of fees have actually been paid. They're the same (~25%) across
 # rain vs. not rain
 rain_vs_no_rain_summary <- daily_data %>% 
   group_by(did_it_rain) %>% 
@@ -317,15 +322,3 @@ rain_vs_no_rain_summary <- daily_data %>%
     paid_per_ticket = total_paid_fees / total_tickets,
     fee_per_ticket = total_fees_paid_and_still_due / total_tickets
   )
-
-### plots on plots
-
-boxplot_by_weather_and_day(daily_data)
-
-linear_model <- function(ticket_data_by_day) {
-  ticket_data_by_day$char_day_of_week <- as.character(ticket_data_by_day$day_of_week)
-  day_of_week_model <- lm(total_tickets ~ did_it_rain + char_day_of_week, data = ticket_data_by_day)
-  print(summary(day_of_week_model))
-  return(day_of_week_model)
-}
-model <- linear_model(daily_data)
